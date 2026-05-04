@@ -232,7 +232,7 @@ $avatar_colors = ['a', 'b', 'c', 'd', 'e', 'f'];
     <div class="hero-inner">
         <div class="topbar">
             <a href="dashboard_admin.php" class="back-btn"><i class="bi bi-arrow-left"></i> Kembali ke Dashboard</a>
-            <div class="text-white opacity-75 small"><i class="bi bi-person-circle me-1"></i> Admin <?= $nama_admin ?></div>
+            <div class="text-white opacity-75 small"><i class="bi bi-person-circle me-1"></i> <?= $nama_admin ?></div>
         </div>
         <h1 class="hero-title">Manajemen Pengguna</h1>
         <p class="hero-sub">Kelola hak akses, lihat daftar pengguna, dan hapus akun jika diperlukan.</p>
