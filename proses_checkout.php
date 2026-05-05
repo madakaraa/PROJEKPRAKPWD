@@ -2,66 +2,57 @@
 session_start();
 include 'koneksi.php';
 
-// Pastikan hanya user yang bisa melakukan checkout
-if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'user') {
+// Pastikan user sudah login
+if (!isset($_SESSION['login'])) {
     header("Location: login.php");
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $id_user       = $_SESSION['id'];
-    $tgl_pinjam    = mysqli_real_escape_string($conn, $_POST['tgl_pinjam']);
-    $tgl_kembali   = mysqli_real_escape_string($conn, $_POST['tgl_kembali']);
-    $nama_peminjam = mysqli_real_escape_string($conn, $_POST['nama_peminjam']);
-    $keperluan     = mysqli_real_escape_string($conn, $_POST['keperluan']);
-    $metode_ambil  = mysqli_real_escape_string($conn, $_POST['metode_ambil']);
+$id_user = $_SESSION['id'];
 
-    // 1. Ambil semua barang dari keranjang milik user ini
-    $keranjang = mysqli_query($conn, "SELECT * FROM keranjang WHERE id_user = '$id_user'");
+// Tangkap data dari form keranjang_view.php
+$tgl_pinjam  = mysqli_real_escape_string($conn, $_POST['tgl_pinjam']);
+$tgl_kembali = mysqli_real_escape_string($conn, $_POST['tgl_kembali']);
+// Jika tabel database lu punya kolom keperluan/no_telp, lu bisa tambahkan di query INSERT nanti.
+// $keperluan   = mysqli_real_escape_string($conn, $_POST['keperluan']); 
 
-    if (mysqli_num_rows($keranjang) > 0) {
-        
-        // 2. Looping memproses setiap barang
-        while ($item = mysqli_fetch_assoc($keranjang)) {
-            $id_barang = $item['id_barang'];
-            $jumlah    = $item['jumlah'];
+// 1. Ambil semua barang yang ada di keranjang user ini
+$query_keranjang = mysqli_query($conn, "SELECT * FROM keranjang WHERE id_user = '$id_user'");
 
-            // Masukkan ke riwayat peminjaman
-            $query_pinjam = "INSERT INTO peminjaman 
-                            (id_user, id_barang, jumlah, tgl_pinjam, tgl_kembali, nama_peminjam, keperluan, metode_ambil, status) 
-                            VALUES 
-                            ('$id_user', '$id_barang', '$jumlah', '$tgl_pinjam', '$tgl_kembali', '$nama_peminjam', '$keperluan', '$metode_ambil', 'menunggu')";
-            mysqli_query($conn, $query_pinjam);
-
-            // Kurangi stok barang
-            mysqli_query($conn, "UPDATE barang SET stok = stok - $jumlah WHERE id = '$id_barang'");
-            
-            // Ubah jadi habis kalau stok 0
-            mysqli_query($conn, "UPDATE barang SET status = 'Habis' WHERE id = '$id_barang' AND stok <= 0");
-        }
-
-        // 3. Kosongkan keranjang user
-        mysqli_query($conn, "DELETE FROM keranjang WHERE id_user = '$id_user'");
-
-        // 4. Catat aktivitas (Opsional)
-        if(function_exists('catat_aktivitas')){
-            catat_aktivitas($conn, "$nama_peminjam mengajukan peminjaman baru", "Menunggu Verifikasi", "baru");
-        }
-
-        // 5. REDIRECT KE DASHBOARD DENGAN URL-ENCODE (INI KUNCI BIAR PESANNYA MUNCUL!)
-        $pesan_sukses = "Barang berhasil diajukan dan sedang menunggu verifikasi Admin.";
-        header("Location: dashboard.php?pesan=" . urlencode($pesan_sukses));
-        exit;
-
-    } else {
-        // Kalau keranjangnya kosong
-        $pesan_gagal = "Keranjang Anda kosong!";
-        header("Location: keranjang_view.php?pesan=" . urlencode($pesan_gagal));
-        exit;
-    }
-
-} else {
-    header("Location: keranjang_view.php");
+if (mysqli_num_rows($query_keranjang) == 0) {
+    // Kalau keranjang kosong, kembalikan ke halaman barang
+    header("Location: barang.php");
     exit;
+}
+
+$berhasil = true;
+
+// 2. Looping data keranjang, pindahkan satu per satu ke tabel peminjaman
+while ($item = mysqli_fetch_assoc($query_keranjang)) {
+    $id_barang = $item['id_barang'];
+    $jumlah    = $item['jumlah'];
+    $status    = 'menunggu'; // Status awal saat diajukan
+
+    // Query masukkan data ke tabel peminjaman
+    $insert = mysqli_query($conn, "INSERT INTO peminjaman (id_user, id_barang, jumlah, tgl_pinjam, tgl_kembali, status) 
+                                   VALUES ('$id_user', '$id_barang', '$jumlah', '$tgl_pinjam', '$tgl_kembali', '$status')");
+
+    if (!$insert) {
+        $berhasil = false;
+    } else {
+        // (Opsional) Kurangi stok barang agar tidak dipinjam orang lain di saat bersamaan
+        mysqli_query($conn, "UPDATE barang SET stok = stok - $jumlah WHERE id = '$id_barang'");
+    }
+}
+
+if ($berhasil) {
+    // 3. Hapus / Kosongkan keranjang milik user ini karena sudah di-checkout
+    mysqli_query($conn, "DELETE FROM keranjang WHERE id_user = '$id_user'");
+
+    // 4. TIKET PULANG: Arahkan ke Dashboard dengan membawa Pesan Sukses
+    header("Location: dashboard.php?pesan=" . urlencode("Pengajuan barang berhasil dikirim dan menunggu verifikasi Admin!"));
+    exit;
+} else {
+    echo "Gagal memproses peminjaman: " . mysqli_error($conn);
 }
 ?>
