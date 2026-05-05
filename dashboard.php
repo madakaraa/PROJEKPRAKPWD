@@ -7,7 +7,9 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'user') {
     exit;
 }
 
-$nama = isset($_SESSION['nama']) ? htmlspecialchars($_SESSION['nama']) : 'User';
+// FORMAT NAMA USER (Kapital di awal kata)
+$nama_asli = isset($_SESSION['nama']) ? htmlspecialchars($_SESSION['nama']) : 'User';
+$nama = ucwords(strtolower($nama_asli));
 $inisial = strtoupper(substr($nama, 0, 1));
 ?>
 <!DOCTYPE html>
@@ -419,7 +421,10 @@ $inisial = strtoupper(substr($nama, 0, 1));
 
         .act-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
         .act-dot.green  { background: #5DCAA5; }
+        .act-badge.returned { background: rgba(16, 185, 129, 0.1); color: #10b981; }
         .act-dot.amber  { background: #EF9F27; }
+        .act-dot.red    { background: #ef4444; }
+        .act-badge.danger { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
         .act-dot.blue   { background: #378ADD; }
 
         .act-info { flex: 1; }
@@ -512,7 +517,7 @@ $inisial = strtoupper(substr($nama, 0, 1));
                 </a>
                 <div class="avatar-pill">
                     <div class="avatar-circle"><?= $inisial; ?></div>
-                    <span class="avatar-username"><?= ($nama); ?></span>
+                    <span class="avatar-username"><?= $nama; ?></span>
                 </div>
             </div>
         </div>
@@ -643,58 +648,112 @@ $inisial = strtoupper(substr($nama, 0, 1));
         </a>
     </div>
 
-    <!-- Aktivitas Terkini User (Dinamis dari Peminjaman) -->
+    <!-- Aktivitas Terkini User (Dinamis dari Peminjaman & Barang) -->
+    <!-- Aktivitas Terkini User (Dinamis dari Peminjaman & Barang) -->
     <div class="section-hd">
         <span class="section-title">Aktivitas terkini</span>
     </div>
+    
     <div class="activity-card">
         <div class="act-list">
             <?php
-            // LOGIKA BARU: Tarik data langsung dari tabel transaksi[cite: 4]
-            $q_aktivitas = mysqli_query($conn, "SELECT p.*, u.nama, b.nama_barang 
-                                                FROM peminjaman p 
-                                                JOIN users u ON p.id_user = u.id 
-                                                JOIN barang b ON p.id_barang = b.id 
-                                                ORDER BY p.id DESC LIMIT 5");
-            
-            if($q_aktivitas && mysqli_num_rows($q_aktivitas) > 0) {
-                while($akt = mysqli_fetch_assoc($q_aktivitas)) {
-                    $status_act = strtolower($akt['status']);
-                    $nama_user  = htmlspecialchars($akt['nama']);
-                    $nama_brg   = htmlspecialchars($akt['nama_barang']);
+            $id_user_login = $_SESSION['id'];
+            $log_user = [];
+
+            // 1. Tarik data peminjaman
+            $q_pinjam = mysqli_query($conn, "SELECT p.id, p.status, b.nama_barang, p.created_at,
+                                             (SELECT COUNT(*) FROM peminjaman p2 WHERE p2.id_user = p.id_user AND p2.id <= p.id) AS urutan_tr 
+                                             FROM peminjaman p 
+                                             JOIN barang b ON p.id_barang = b.id 
+                                             WHERE p.id_user = '$id_user_login'
+                                             ORDER BY p.id DESC LIMIT 5");
+            if($q_pinjam) {
+                while($act = mysqli_fetch_assoc($q_pinjam)) {
+                    $log_user[] = [
+                        'jenis' => 'transaksi',
+                        'urutan'=> $act['urutan_tr'],
+                        'barang'=> $act['nama_barang'],
+                        'status'=> strtolower($act['status']),
+                        'waktu' => strtotime($act['created_at'])
+                    ];
+                }
+            }
+
+            // 2. Tarik log aktivitas admin (barang) dengan Waktu Asli
+            $q_log = mysqli_query($conn, "SELECT aksi, nama_barang, waktu FROM log_barang ORDER BY id DESC LIMIT 5");
+            if($q_log) {
+                while($log = mysqli_fetch_assoc($q_log)) {
+                    $log_user[] = [
+                        'jenis' => 'log_barang',
+                        'aksi'  => $log['aksi'],
+                        'barang'=> $log['nama_barang'],
+                        'waktu' => strtotime($log['waktu'])
+                    ];
+                }
+            }
+
+            // 3. Urutkan berdasarkan waktu paling baru
+            usort($log_user, function($a, $b) { return $b['waktu'] - $a['waktu']; });
+            $log_user = array_slice($log_user, 0, 5);
+
+            // TAMPILKAN KE HTML
+            if(count($log_user) > 0) {
+                foreach($log_user as $akt) {
+                    $nama_brg = htmlspecialchars($akt['barang']);
                     
-                    if($status_act == 'menunggu') {
-                        $judul = "<strong>$nama_user</strong> mengajukan peminjaman <strong>$nama_brg</strong>";
-                        $sub   = "Menunggu Verifikasi";
-                        $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Baru';
-                    } elseif($status_act == 'dipinjam' || $status_act == 'aktif') {
-                        $judul = "<strong>$nama_user</strong> sedang meminjam <strong>$nama_brg</strong>";
-                        $sub   = "Sedang Dipinjam";
-                        $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Aktif';
-                    } elseif($status_act == 'menunggu_kembali') {
-                        $judul = "<strong>$nama_user</strong> mengajukan pengembalian <strong>$nama_brg</strong>";
-                        $sub   = "Pengecekan Admin";
-                        $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Cek';
-                    } elseif($status_act == 'dikembalikan') {
-                        $judul = "<strong>$nama_user</strong> telah mengembalikan <strong>$nama_brg</strong>";
-                        $sub   = "Selesai";
-                        $warna_titik = 'green'; $badge_class = 'returned'; $teks_badge = 'Selesai';
+                    if($akt['jenis'] == 'log_barang') {
+                        $aksi = $akt['aksi'];
+                        if($aksi == 'tambah') {
+                            $judul = "Admin menambahkan barang: <strong>$nama_brg</strong>";
+                            $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Katalog Baru';
+                        } elseif($aksi == 'edit') {
+                            $judul = "Admin mengupdate data: <strong>$nama_brg</strong>";
+                            $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Update';
+                        } elseif($aksi == 'hapus') {
+                            $judul = "<strong>Admin</strong> menghapus barang: <strong>$nama_brg</strong>";
+                            $warna_titik = 'red'; $badge_class = 'danger'; $teks_badge = 'Hapus';
+                        }
+                        
+                        echo '
+                        <div class="act-item">
+                            <div class="act-dot '.$warna_titik.'"></div>
+                            <div class="act-info">
+                                <div class="act-title">'.$judul.'</div>
+                            </div>
+                            <span class="act-badge '.$badge_class.'">'.$teks_badge.'</span>
+                        </div>';
                     } else {
-                        $judul = "<strong>$nama_user</strong> melakukan transaksi <strong>$nama_brg</strong>";
-                        $sub   = "Info";
-                        $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Info';
+                        // Transaksi User
+                        $status_act = $akt['status'];
+                        $id_teks = "TR-" . $akt['urutan'];
+                        
+                        if($status_act == 'menunggu') {
+                            $judul = "Kamu mengajukan peminjaman <strong>$nama_brg</strong>";
+                            $sub = "Menunggu Verifikasi"; $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Baru';
+                        } elseif($status_act == 'dipinjam' || $status_act == 'aktif') {
+                            $judul = "Kamu sedang meminjam <strong>$nama_brg</strong>";
+                            $sub = "Sedang Dipinjam"; $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Aktif';
+                        } elseif($status_act == 'menunggu_kembali') {
+                            $judul = "Kamu mengajukan pengembalian <strong>$nama_brg</strong>";
+                            $sub = "Pengecekan Admin"; $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Cek';
+                        } elseif($status_act == 'dikembalikan') {
+                            $judul = "Kamu telah mengembalikan <strong>$nama_brg</strong>";
+                            $sub = "Selesai"; $warna_titik = 'green'; $badge_class = 'returned'; $teks_badge = 'Selesai';
+                        } else {
+                            $judul = "Transaksi <strong>$nama_brg</strong>";
+                            $sub = "Info"; $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Info';
+                        }
+
+                        echo '
+                        <div class="act-item">
+                            <div class="act-dot '.$warna_titik.'"></div>
+                            <div class="act-info">
+                                <div class="act-title">'.$judul.'</div>
+                                <div class="act-time">ID: #'.$id_teks.' &bull; '.$sub.'</div>
+                            </div>
+                            <span class="act-badge '.$badge_class.'">'.$teks_badge.'</span>
+                        </div>';
                     }
-            ?>
-                <div class="act-item">
-                    <div class="act-dot <?= $warna_titik; ?>"></div>
-                    <div class="act-info">
-                        <div class="act-title"><?= $judul; ?></div>
-                        <div class="act-time">
-                        </div>
-                    </div>
-                    <span class="act-badge <?= $badge_class; ?>"><?= $teks_badge; ?></span>
-                </div>
-            <?php 
                 }
             } else {
                 echo '<div class="act-item text-muted justify-content-center" style="font-size: 13px;">Belum ada aktivitas terekam.</div>';
@@ -715,7 +774,7 @@ $inisial = strtoupper(substr($nama, 0, 1));
     <div class="db-footer">
         <span>PinjamBareng &copy; 2026</span>
         <div class="footer-right">
-            <span>Masuk sebagai <span class="footer-user"><?= ($nama); ?></span></span>
+            <span>Masuk sebagai <span class="footer-user"><?= $nama; ?></span></span>
             <span>&middot;</span>
             <a href="logout.php" class="footer-logout">Keluar</a>
         </div>
