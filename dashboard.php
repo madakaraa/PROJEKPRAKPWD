@@ -7,7 +7,7 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'user') {
     exit;
 }
 
-$nama = htmlspecialchars($_SESSION['nama']);
+$nama = isset($_SESSION['nama']) ? htmlspecialchars($_SESSION['nama']) : 'User';
 $inisial = strtoupper(substr($nama, 0, 1));
 ?>
 <!DOCTYPE html>
@@ -507,12 +507,12 @@ $inisial = strtoupper(substr($nama, 0, 1));
                 PinjamBareng
             </div>
             <div class="topbar-right">
-                <a href="#" class="notif-btn" title="Notifikasi">
-                    <i class="bi bi-bell" style="font-size: 15px;"></i>
+                  <a href="logout.php" class="notif-btn" title="Keluar" onclick="return confirm('Apakah Anda yakin ingin keluar?')">
+                    <i class="bi bi-box-arrow-right" style="font-size: 15px;"></i>
                 </a>
                 <div class="avatar-pill">
                     <div class="avatar-circle"><?= $inisial; ?></div>
-                    <span class="avatar-username"><?= strtolower($nama); ?></span>
+                    <span class="avatar-username"><?= ($nama); ?></span>
                 </div>
             </div>
         </div>
@@ -561,30 +561,20 @@ $inisial = strtoupper(substr($nama, 0, 1));
     <div class="welcome-banner">
         <!-- Ilustrasi SVG: orang memegang kotak/paket -->
         <svg class="wb-illus" viewBox="0 0 110 90" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <!-- Bayangan -->
             <ellipse cx="55" cy="85" rx="30" ry="4" fill="#e2e8f0"/>
-            <!-- Kotak utama -->
             <rect x="28" y="30" width="44" height="38" rx="6" fill="#E6F1FB"/>
             <rect x="28" y="30" width="44" height="38" rx="6" stroke="#185FA5" stroke-width="1.2"/>
-            <!-- Garis tengah kotak -->
             <line x1="50" y1="30" x2="50" y2="68" stroke="#185FA5" stroke-width="1" stroke-dasharray="3 2" opacity="0.4"/>
-            <!-- Pita kotak -->
             <rect x="40" y="30" width="20" height="8" rx="3" fill="#378ADD" opacity="0.25"/>
             <path d="M50 30 v-6" stroke="#378ADD" stroke-width="1.5" stroke-linecap="round"/>
             <path d="M44 24 q6-6 12 0" stroke="#378ADD" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-            <!-- Tangan kiri -->
             <path d="M18 55 Q14 50 20 46 L30 50" stroke="#0C1B33" stroke-width="2" stroke-linecap="round" fill="none"/>
             <circle cx="17" cy="56" r="4" fill="#f8d7b5" stroke="#e0b98a" stroke-width="0.8"/>
-            <!-- Tangan kanan -->
             <path d="M92 55 Q96 50 90 46 L80 50" stroke="#0C1B33" stroke-width="2" stroke-linecap="round" fill="none"/>
             <circle cx="93" cy="56" r="4" fill="#f8d7b5" stroke="#e0b98a" stroke-width="0.8"/>
-            <!-- Badan orang -->
             <rect x="40" y="68" width="30" height="14" rx="5" fill="#0C1B33"/>
-            <!-- Kepala -->
             <circle cx="55" cy="22" r="10" fill="#f8d7b5" stroke="#e0b98a" stroke-width="0.8"/>
-            <!-- Rambut -->
             <path d="M45 20 Q50 12 60 14 Q66 16 65 22" fill="#2d1b0e" stroke="none"/>
-            <!-- Bintang dekoratif -->
             <text x="88" y="22" font-size="12" fill="#EF9F27" font-family="sans-serif">✦</text>
             <text x="12" y="30" font-size="8" fill="#5DCAA5" font-family="sans-serif">✦</text>
         </svg>
@@ -603,7 +593,7 @@ $inisial = strtoupper(substr($nama, 0, 1));
         </div>
     </div>
 
-    <!-- NOTIFIKASI PESAN DARI KERANJANG/CHECKOUT -->
+    <!-- NOTIFIKASI PESAN -->
     <?php if(isset($_GET['pesan']) && isset($_SESSION['role']) && $_SESSION['role'] == 'user'): ?>
         <div class="alert alert-dismissible fade show shadow-sm mb-4" style="background-color: #EAF3DE; color: #27500A; border: 1px solid rgba(39, 80, 10, 0.2); border-radius: 16px; padding: 1rem 1.25rem;" role="alert">
             <i class="bi bi-check-circle-fill me-2" style="color: #5DCAA5;"></i> <strong>Peminjaman Sukses!</strong> <?= htmlspecialchars($_GET['pesan']); ?>
@@ -653,37 +643,53 @@ $inisial = strtoupper(substr($nama, 0, 1));
         </a>
     </div>
 
-    <!-- Aktivitas Terkini (Dinamis dari Database) -->
+    <!-- Aktivitas Terkini User (Dinamis dari Peminjaman) -->
     <div class="section-hd">
         <span class="section-title">Aktivitas terkini</span>
-        <a href="riwayat.php" class="section-link">Lihat semua</a>
     </div>
     <div class="activity-card">
         <div class="act-list">
             <?php
-            // Mengambil 5 aktivitas terbaru
-            // Pastikan fungsi waktu_lalu() sudah ada di koneksi.php
-            $query_aktivitas = mysqli_query($conn, "SELECT * FROM aktivitas ORDER BY created_at DESC LIMIT 5");
+            // LOGIKA BARU: Tarik data langsung dari tabel transaksi[cite: 4]
+            $q_aktivitas = mysqli_query($conn, "SELECT p.*, u.nama, b.nama_barang 
+                                                FROM peminjaman p 
+                                                JOIN users u ON p.id_user = u.id 
+                                                JOIN barang b ON p.id_barang = b.id 
+                                                ORDER BY p.id DESC LIMIT 5");
             
-            if($query_aktivitas && mysqli_num_rows($query_aktivitas) > 0) {
-                while($akt = mysqli_fetch_assoc($query_aktivitas)) {
-                    $warna_titik = ''; $badge_class = ''; $teks_badge = '';
+            if($q_aktivitas && mysqli_num_rows($q_aktivitas) > 0) {
+                while($akt = mysqli_fetch_assoc($q_aktivitas)) {
+                    $status_act = strtolower($akt['status']);
+                    $nama_user  = htmlspecialchars($akt['nama']);
+                    $nama_brg   = htmlspecialchars($akt['nama_barang']);
                     
-                    if($akt['kategori'] == 'selesai') {
-                        $warna_titik = 'green'; $badge_class = 'returned'; $teks_badge = 'Selesai';
-                    } elseif($akt['kategori'] == 'aktif') {
-                        $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Aktif';
-                    } else {
+                    if($status_act == 'menunggu') {
+                        $judul = "<strong>$nama_user</strong> mengajukan peminjaman <strong>$nama_brg</strong>";
+                        $sub   = "Menunggu Verifikasi";
                         $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Baru';
+                    } elseif($status_act == 'dipinjam' || $status_act == 'aktif') {
+                        $judul = "<strong>$nama_user</strong> sedang meminjam <strong>$nama_brg</strong>";
+                        $sub   = "Sedang Dipinjam";
+                        $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Aktif';
+                    } elseif($status_act == 'menunggu_kembali') {
+                        $judul = "<strong>$nama_user</strong> mengajukan pengembalian <strong>$nama_brg</strong>";
+                        $sub   = "Pengecekan Admin";
+                        $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Cek';
+                    } elseif($status_act == 'dikembalikan') {
+                        $judul = "<strong>$nama_user</strong> telah mengembalikan <strong>$nama_brg</strong>";
+                        $sub   = "Selesai";
+                        $warna_titik = 'green'; $badge_class = 'returned'; $teks_badge = 'Selesai';
+                    } else {
+                        $judul = "<strong>$nama_user</strong> melakukan transaksi <strong>$nama_brg</strong>";
+                        $sub   = "Info";
+                        $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Info';
                     }
             ?>
                 <div class="act-item">
                     <div class="act-dot <?= $warna_titik; ?>"></div>
                     <div class="act-info">
-                        <div class="act-title"><?= htmlspecialchars($akt['deskripsi']); ?></div>
+                        <div class="act-title"><?= $judul; ?></div>
                         <div class="act-time">
-                            <?= function_exists('waktu_lalu') ? waktu_lalu($akt['created_at']) : $akt['created_at']; ?> 
-                            <?= !empty($akt['sub_deskripsi']) ? ' • ' . htmlspecialchars($akt['sub_deskripsi']) : ''; ?>
                         </div>
                     </div>
                     <span class="act-badge <?= $badge_class; ?>"><?= $teks_badge; ?></span>
@@ -709,7 +715,7 @@ $inisial = strtoupper(substr($nama, 0, 1));
     <div class="db-footer">
         <span>PinjamBareng &copy; 2026</span>
         <div class="footer-right">
-            <span>Masuk sebagai <span class="footer-user"><?= strtolower($nama); ?></span></span>
+            <span>Masuk sebagai <span class="footer-user"><?= ($nama); ?></span></span>
             <span>&middot;</span>
             <a href="logout.php" class="footer-logout">Keluar</a>
         </div>
