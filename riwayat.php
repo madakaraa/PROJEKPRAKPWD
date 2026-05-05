@@ -2,34 +2,91 @@
 session_start();
 include 'koneksi.php';
 
-// Proteksi (harus login)
 if (!isset($_SESSION['login'])) {
     header("Location: login.php");
     exit;
 }
 
 $id_user = $_SESSION['id'];
-$role    = $_SESSION['role'];
+$role = $_SESSION['role'];
 
-// Logika Pemisahan Query
+// --- LOGIKA SETUJUI PEMINJAMAN AWAL (KHUSUS ADMIN) ---
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['setujui_pinjam']) && $role == 'admin') {
+    $id_pinjam = $_POST['id_pinjam'];
+    mysqli_query($conn, "UPDATE peminjaman SET status = 'dipinjam' WHERE id = '$id_pinjam'");
+    header("Location: riwayat.php?pesan=" . urlencode("Peminjaman berhasil disetujui!"));
+    exit;
+}
+
+// --- LOGIKA USER KLIK "SUDAH DIKEMBALIKAN" ---
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['ajukan_kembali']) && $role == 'user') {
+    $id_pinjam = $_POST['id_pinjam'];
+    mysqli_query($conn, "UPDATE peminjaman SET status = 'menunggu_kembali' WHERE id = '$id_pinjam'");
+    header("Location: riwayat.php?pesan=" . urlencode("Mantap! Menunggu admin mengecek kondisi barang Anda."));
+    exit;
+}
+
+// --- LOGIKA ADMIN CEK KONDISI & TERIMA BARANG ---
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['kembalikan_barang']) && $role == 'admin') {
+    $id_pinjam = $_POST['id_pinjam'];
+    $id_barang = $_POST['id_barang'];
+    $jumlah = (int)$_POST['jumlah'];
+    $kondisi_kembali = $_POST['kondisi_kembali'];
+
+    mysqli_query($conn, "UPDATE peminjaman SET status = 'dikembalikan', kondisi_kembali = '$kondisi_kembali' WHERE id = '$id_pinjam'");
+
+    if ($kondisi_kembali == 'Baik') {
+        mysqli_query($conn, "UPDATE barang SET stok = stok + $jumlah, status = 'Tersedia' WHERE id = '$id_barang'");
+    } else {
+        $cek_barang = mysqli_query($conn, "SELECT * FROM barang WHERE id = '$id_barang'");
+        if ($data_brg = mysqli_fetch_assoc($cek_barang)) {
+            $nama_brg   = mysqli_real_escape_string($conn, $data_brg['nama_barang']);
+            $desc_brg   = mysqli_real_escape_string($conn, $data_brg['deskripsi']);
+            $gambar_brg = isset($data_brg['gambar']) ? mysqli_real_escape_string($conn, $data_brg['gambar']) : '';
+
+            $cek_rusak = mysqli_query($conn, "SELECT id FROM barang WHERE nama_barang = '$nama_brg' AND kondisi = 'Rusak'");
+            if (mysqli_num_rows($cek_rusak) > 0) {
+                $id_rusak = mysqli_fetch_assoc($cek_rusak)['id'];
+                mysqli_query($conn, "UPDATE barang SET stok = stok + $jumlah WHERE id = '$id_rusak'");
+            } else {
+                mysqli_query($conn, "INSERT INTO barang (nama_barang, deskripsi, kondisi, status, stok, gambar) VALUES ('$nama_brg', '$desc_brg', 'Rusak', 'Habis', '$jumlah', '$gambar_brg')");
+            }
+        }
+    }
+    header("Location: riwayat.php?pesan=" . urlencode("Sip! Barang dikonfirmasi dengan kondisi: " . $kondisi_kembali));
+    exit;
+}
+
+// --- LOGIKA HAPUS RIWAYAT TRANSAKSI (SOFT DELETE KHUSUS ADMIN) ---
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['hapus_riwayat']) && $role == 'admin') {
+    $id_pinjam = $_POST['id_pinjam'];
+    mysqli_query($conn, "UPDATE peminjaman SET hapus_admin = 1 WHERE id = '$id_pinjam'");
+    header("Location: riwayat.php?pesan=" . urlencode("Riwayat transaksi berhasil dibersihkan dari tampilan Admin!"));
+    exit;
+}
+// -----------------------------------------------------
+
+// --- UPDATE QUERY: MENGHITUNG URUTAN TRANSAKSI PER USER ---
 if ($role == 'admin') {
-    $query_sql = "SELECT peminjaman.*, users.nama AS peminjam_nama 
-                  FROM peminjaman 
-                  LEFT JOIN users ON peminjaman.id_user = users.id 
-                  ORDER BY peminjaman.id DESC";
+    $query = "SELECT p.*, b.nama_barang, u.username,
+                     (SELECT COUNT(*) FROM peminjaman p2 WHERE p2.id_user = p.id_user AND p2.id <= p.id) AS urutan_tr 
+              FROM peminjaman p 
+              JOIN barang b ON p.id_barang = b.id 
+              JOIN users u ON p.id_user = u.id 
+              WHERE p.hapus_admin = 0 
+              ORDER BY p.id DESC";
 } else {
-    $id_user_safe = mysqli_real_escape_string($conn, $id_user);
-    $query_sql = "SELECT * FROM peminjaman WHERE id_user = '$id_user_safe' ORDER BY id DESC";
+    $query = "SELECT p.*, b.nama_barang, u.username,
+                     (SELECT COUNT(*) FROM peminjaman p2 WHERE p2.id_user = p.id_user AND p2.id <= p.id) AS urutan_tr 
+              FROM peminjaman p 
+              JOIN barang b ON p.id_barang = b.id 
+              JOIN users u ON p.id_user = u.id 
+              WHERE p.id_user = '$id_user' 
+              ORDER BY p.id DESC";
 }
 
-$peminjaman = mysqli_query($conn, $query_sql);
-
-// --- LOGIKA MENGHITUNG TR PER USER ---
-$user_totals = [];
-$q_totals = mysqli_query($conn, "SELECT id_user, COUNT(*) as total FROM peminjaman GROUP BY id_user");
-while($rt = mysqli_fetch_assoc($q_totals)) {
-    $user_totals[$rt['id_user']] = $rt['total'];
-}
+$result = mysqli_query($conn, $query);
+$pesan_notif = isset($_GET['pesan']) ? htmlspecialchars($_GET['pesan']) : '';
 ?>
 
 <!DOCTYPE html>
@@ -38,240 +95,243 @@ while($rt = mysqli_fetch_assoc($q_totals)) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Riwayat Peminjaman - PinjamBareng</title>
-
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f8f9fa;
-            color: #343a40;
-        }
+        body { font-family: 'Inter', sans-serif; background: #f8fafc; color: #1e293b; padding-bottom: 3rem; }
+        .page-header { max-width: 900px; margin: 3rem auto 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .page-title h1 { font-size: 1.8rem; font-weight: 700; color: #0f172a; margin: 0; }
+        .page-title p { font-size: 0.9rem; color: #64748b; margin: 0; }
+        .header-btns { display: flex; gap: 10px; }
+        .btn-outline { border: 1px solid #e2e8f0; background: white; color: #0f172a; padding: 0.5rem 1rem; border-radius: 50px; font-weight: 500; font-size: 0.9rem; text-decoration: none; }
+        .btn-primary-custom { background: #0d6efd; color: white; padding: 0.5rem 1rem; border-radius: 50px; font-weight: 500; font-size: 0.9rem; text-decoration: none; transition: all 0.2s; }
+        .btn-primary-custom:hover { background: #0b5ed7; color: white; }
+        
+        .history-card { max-width: 900px; margin: 0 auto 1.5rem; background: white; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); }
+        .hc-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
+        .hc-id { font-weight: 700; color: #0d6efd; font-size: 0.95rem; display: flex; align-items: center; gap: 10px; }
+        .hc-user { background: #f8fafc; border: 1px solid #e2e8f0; padding: 3px 10px; border-radius: 50px; font-size: 0.75rem; color: #475569; font-weight: 500; }
+        .hc-telp { font-size: 0.8rem; color: #64748b; font-weight: 400; margin-left: 5px; }
+        
+        .status-badge { padding: 5px 12px; border-radius: 50px; font-size: 0.75rem; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+        .status-dikembalikan { background: #d1fae5; color: #059669; }
+        .status-dipinjam { background: #fef3c7; color: #d97706; }
+        .status-menunggu { background: #e0f2fe; color: #0284c7; }
+        .status-mengecek { background: #f3e8ff; color: #9333ea; }
+        
+        .hc-body { padding: 1.5rem; }
+        .date-box { background: #f8fafc; border-radius: 12px; padding: 1rem 1.5rem; display: flex; gap: 4rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+        .db-item span { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 4px; }
+        .db-item strong { display: block; font-size: 0.95rem; color: #0f172a; font-weight: 600; }
+        
+        .tag-list { display: flex; gap: 8px; margin-bottom: 1.5rem; }
+        .tag { border: 1px solid #e2e8f0; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; color: #64748b; font-weight: 500; display: flex; align-items: center; gap: 5px; }
+        .tag-blue { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+        
+        .item-row { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #f1f5f9; padding-top: 1rem; }
+        .item-name { font-weight: 600; color: #1e293b; display: flex; align-items: center; gap: 8px; }
+        .item-qty { border: 1px solid #bfdbfe; color: #2563eb; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.8rem; font-weight: 600; }
+        
+        .hc-footer { padding: 1rem 1.5rem; background: #f8fafc; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end; align-items: center; }
+        
+        .admin-action-box { display: flex; align-items: center; gap: 15px; }
+        .form-select-sm { width: auto; border-radius: 8px; font-size: 0.85rem; }
+        .btn-konfirmasi { background: #10b981; color: white; border: none; padding: 0.4rem 1rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; }
+        .btn-konfirmasi:hover { background: #059669; }
+        .btn-setujui { background: #0d6efd; color: white; border: none; padding: 0.4rem 1rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-setujui:hover { background: #0b5ed7; }
+        
+        .info-kondisi-balik { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+        .kondisi-msg { padding: 5px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+        .msg-baik { background: #d1fae5; color: #059669; }
+        .msg-rusak { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
 
-        .history-card {
-            background: #ffffff;
-            border-radius: 16px;
-            border: 1px solid rgba(0,0,0,0.05);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.02);
-            margin-bottom: 1.5rem;
-            overflow: hidden;
-        }
-
-        .history-header {
-            background-color: #fdfdfd;
-            border-bottom: 1px solid rgba(0,0,0,0.05);
-            padding: 1rem 1.5rem;
-        }
-
-        .history-body { padding: 1.5rem; }
-
-        .history-footer {
-            background-color: #fdfdfd;
-            border-top: 1px solid rgba(0,0,0,0.05);
-            padding: 1rem 1.5rem;
-        }
-
-        .table-detail { margin-bottom: 0; }
-        .table-detail th {
-            font-size: 0.85rem; color: #6c757d; text-transform: uppercase;
-            border-bottom: 2px solid #f1f3f5; padding-left: 0;
-        }
-        .table-detail td {
-            font-size: 0.95rem; vertical-align: middle;
-            border-bottom: 1px solid #f1f3f5; padding-left: 0;
-        }
-        .table-detail tr:last-child td { border-bottom: none; }
-
-        /* Styling Badge Status untuk 3 Tahapan */
-        .badge-status { padding: 0.5em 1em; font-weight: 500; border-radius: 8px; }
-        .badge-dipinjam { background-color: rgba(253, 126, 20, 0.1); color: #fd7e14; }
-        .badge-menunggu { background-color: rgba(255, 193, 7, 0.15); color: #b07d00; }
-        .badge-dikembalikan { background-color: rgba(25, 135, 84, 0.1); color: #198754; }
+        .btn-delete { border: 1px solid #fecaca; color: #dc2626; background: white; padding: 0.4rem 0.8rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 5px; }
+        .btn-delete:hover { background: #fee2e2; }
     </style>
 </head>
 <body>
 
-<div class="container py-5 max-w-custom" style="max-width: 900px;">
-
-    <!-- Notifikasi Sukses/Gagal -->
-    <?php if(isset($_GET['pesan'])): ?>
-        <div class="alert alert-success alert-dismissible fade show border-0 shadow-sm" role="alert">
-            <i class="bi bi-check-circle-fill me-2"></i> <?= htmlspecialchars($_GET['pesan']); ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+<div class="container">
+    <div class="page-header">
+        <div class="page-title">
+            <h1>Riwayat Peminjaman</h1>
+            <p>Pantau dan konfirmasi pengembalian barang.</p>
         </div>
-    <?php endif; ?>
-
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4 gap-3">
-        <div>
-            <h3 class="fw-bold mb-0">Riwayat Peminjaman</h3>
-            <p class="text-muted small mb-0">
-                <?= ($role == 'admin') ? "Pantau dan konfirmasi pengembalian barang." : "Daftar transaksi dan status pengembalian barang Anda."; ?>
-            </p>
-        </div>
-        <div class="d-flex gap-2">
-            <a href="barang.php" class="btn btn-light border-0 shadow-sm rounded-pill px-3">
-                <i class="bi bi-box-seam me-1"></i> Daftar Barang
-            </a>
-            <a href="<?= ($role == 'admin') ? 'dashboard_admin.php' : 'dashboard.php'; ?>" class="btn btn-primary shadow-sm rounded-pill px-3">
-                <i class="bi bi-house-door me-1"></i> Dashboard
-            </a>
+        <div class="header-btns">
+            <a href="barang.php" class="btn-outline"><i class="bi bi-box-seam me-1"></i> Daftar Barang</a>
+            <a href="<?= ($role == 'admin') ? 'dashboard_admin.php' : 'dashboard.php'; ?>" class="btn-primary-custom"><i class="bi bi-house-door me-1"></i> Dashboard</a>
         </div>
     </div>
 
-    <?php if($peminjaman && mysqli_num_rows($peminjaman) == 0): ?>
-        <div class="text-center py-5 text-muted bg-white rounded-4 shadow-sm border border-light">
-            <i class="bi bi-receipt fs-1 d-block mb-3 text-secondary"></i>
-            <h5>Belum Ada Riwayat</h5>
+    <?php if($pesan_notif): ?>
+        <div class="alert alert-success" style="max-width: 900px; margin: 0 auto 1.5rem; border-radius: 12px;">
+            <i class="bi bi-check-circle-fill me-2"></i> <?= $pesan_notif; ?>
         </div>
     <?php endif; ?>
 
     <?php 
-    if($peminjaman): 
-        while($p = mysqli_fetch_assoc($peminjaman)): 
-            $status_saat_ini = strtolower($p['status']);
-            
-            // Generate Nomor TR Dinamis per User
-            $u_id = $p['id_user'];
-            $tr_number = $user_totals[$u_id];
-            $user_totals[$u_id]--; // Hitung mundur untuk transaksi yang lebih lama
+    if(mysqli_num_rows($result) > 0) {
+        while($row = mysqli_fetch_assoc($result)) {
+            $status = strtolower($row['status']);
+            $badge_class = 'status-menunggu';
+            $badge_icon = 'bi-clock-history';
+            $badge_text = 'Menunggu Persetujuan';
+
+            if ($status == 'dikembalikan') {
+                $badge_class = 'status-dikembalikan'; $badge_icon = 'bi-check-circle-fill'; $badge_text = 'Sudah Dikembalikan';
+            } elseif ($status == 'dipinjam' || $status == 'aktif') {
+                $badge_class = 'status-dipinjam'; $badge_icon = 'bi-arrow-repeat'; $badge_text = 'Sedang Dipinjam';
+            } elseif ($status == 'menunggu_kembali') {
+                $badge_class = 'status-mengecek'; $badge_icon = 'bi-box-seam'; $badge_text = 'Pengecekan Admin';
+            }
     ?>
-        <div class="history-card">
-            
-            <div class="history-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-                <div class="fw-bold text-primary d-flex align-items-center gap-2">
-                    <!-- TAMPILAN TR SEKARANG MENGGUNAKAN VARIABEL $tr_number -->
-                    <span><i class="bi bi-hash"></i> TR-<?= $tr_number; ?></span>
-                    
-                    <!-- Khusus Admin: Tampilkan nama si peminjam -->
-                    <?php if($role == 'admin' && isset($p['peminjam_nama'])): ?>
-                        <span class="badge bg-light text-dark border ms-2 fw-normal">
-                            <i class="bi bi-person text-secondary me-1"></i> <?= htmlspecialchars($p['peminjam_nama']); ?>
-                        </span>
-                    <?php endif; ?>
-                </div>
+    <div class="history-card">
+        <div class="hc-header">
+            <div class="hc-id">
+                <!-- MENGGUNAKAN URUTAN TRANSAKSI KHUSUS PER USER -->
+                # TR-<?= $row['urutan_tr']; ?> 
+                <span class="hc-user"><i class="bi bi-person me-1"></i> <?= htmlspecialchars($row['username']); ?></span>
                 
-                <!-- LABEL STATUS -->
-                <div>
-                    <?php if($status_saat_ini == 'dipinjam' || $status_saat_ini == 'disetujui'): ?>
-                        <span class="badge badge-status badge-dipinjam">
-                            <i class="bi bi-box-arrow-up-right me-1"></i> Sedang Dipinjam
-                        </span>
-                    <?php elseif($status_saat_ini == 'menunggu'): ?>
-                        <span class="badge badge-status badge-menunggu">
-                            <i class="bi bi-hourglass-split me-1"></i> Menunggu Konfirmasi Admin
-                        </span>
-                    <?php else: ?>
-                        <span class="badge badge-status badge-dikembalikan">
-                            <i class="bi bi-check2-all me-1"></i> Sudah Dikembalikan
-                        </span>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <div class="history-body">
-                <div class="row mb-4 bg-light rounded-3 p-3">
-                    <div class="col-sm-6 mb-2 mb-sm-0">
-                        <small class="text-muted d-block"><i class="bi bi-calendar-arrow-up me-1"></i> Tanggal Pinjam</small>
-                        <span class="fw-medium"><?= htmlspecialchars($p['tgl_pinjam']); ?></span>
-                    </div>
-                    <div class="col-sm-6 border-sm-start">
-                        <small class="text-muted d-block"><i class="bi bi-calendar-arrow-down me-1"></i> Tanggal Kembali</small>
-                        <span class="fw-medium"><?= htmlspecialchars($p['tgl_kembali']); ?></span>
-                    </div>
-                </div>
-
-                <!-- Info Tambahan Peminjam (Metode Ambil & Keperluan) -->
-                <?php if(!empty($p['metode_ambil']) || !empty($p['keperluan'])): ?>
-                <div class="mb-4">
-                    <?php if(!empty($p['metode_ambil'])): ?>
-                        <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary-subtle me-2">
-                            <i class="bi bi-truck me-1"></i> <?= ucwords(str_replace('_', ' ', htmlspecialchars($p['metode_ambil']))); ?>
-                        </span>
-                    <?php endif; ?>
-                    <?php if(!empty($p['keperluan'])): ?>
-                        <span class="badge bg-info bg-opacity-10 text-info border border-info-subtle">
-                            <i class="bi bi-card-text me-1"></i> <?= htmlspecialchars($p['keperluan']); ?>
-                        </span>
-                    <?php endif; ?>
-                </div>
+                <?php if($role == 'admin' && !empty($row['no_telp'])): ?>
+                    <a href="https://wa.me/<?= $row['no_telp']; ?>" target="_blank" class="hc-telp text-decoration-none" title="Hubungi WhatsApp">
+                        <i class="bi bi-whatsapp text-success"></i> <?= htmlspecialchars($row['no_telp']); ?>
+                    </a>
                 <?php endif; ?>
-            
-                <div class="table-responsive px-2">
-                    <table class="table table-detail mb-0">
-                        <thead>
-                            <tr>
-                                <th class="ps-3 border-0 text-muted" style="font-size: 0.8rem;">NAMA BARANG</th>
-                                <th width="25%" class="text-center border-0 text-muted" style="font-size: 0.8rem;">JUMLAH</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php
-                            $id_barang = mysqli_real_escape_string($conn, $p['id_barang']);
-                            $detail = mysqli_query($conn, "SELECT nama_barang FROM barang WHERE id = '$id_barang'");
-                            $d = mysqli_fetch_assoc($detail);
-                            $nama_brg = $d ? htmlspecialchars($d['nama_barang']) : 'Barang Dihapus';
-                            ?>
-                            <tr>
-                                <td class="fw-medium text-dark ps-3 py-3 border-bottom border-light">
-                                    <i class="bi bi-box2 text-muted me-2"></i> <?= $nama_brg; ?>
-                                </td>
-                                <td class="text-center py-3 border-bottom border-light">
-                                    <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-3 py-2 border border-primary-subtle">
-                                        <?= htmlspecialchars($p['jumlah']); ?>
-                                    </span>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
             </div>
-                
-            <!-- AREA TOMBOL AKSI BAWAH -->
-            <div class="history-footer text-end">
-                
-                <?php if($status_saat_ini == 'dipinjam' || $status_saat_ini == 'disetujui'): ?>
-                    
-                    <?php if($role == 'user'): ?>
-                        <a href="proses_kembalikan.php?id=<?= $p['id']; ?>" class="btn btn-outline-primary btn-sm rounded-pill px-4 fw-medium" onclick="return confirm('Apakah Anda sudah menyerahkan barang ini ke Admin?')">
-                            <i class="bi bi-arrow-return-left me-1"></i> Saya Sudah Kembalikan
-                        </a>
-                    <?php else: ?>
-                        <span class="text-muted small fw-medium"><i class="bi bi-person-gear me-1"></i> Menunggu user mengembalikan barang</span>
-                    <?php endif; ?>
-
-                <?php elseif($status_saat_ini == 'menunggu'): ?>
-                    
-                    <?php if($role == 'admin'): ?>
-                        <a href="proses_konfirmasi.php?id=<?= $p['id']; ?>" class="btn btn-success btn-sm rounded-pill px-4 fw-medium shadow-sm" onclick="return confirm('Setujui peminjaman ini?')">
-                            <i class="bi bi-check-circle me-1"></i> Konfirmasi Peminjaman
-                        </a>
-                        <a href="proses_tolak.php?id=<?= $p['id']; ?>" class="btn btn-danger btn-sm rounded-pill px-3 fw-medium shadow-sm" onclick="return confirm('Tolak peminjaman ini?')">
-                            <i class="bi bi-x-circle me-1"></i> Tolak
-                        </a>
-                    <?php else: ?>
-                        <span class="text-warning small fw-medium"><i class="bi bi-clock-history me-1"></i> Sedang diverifikasi oleh Admin</span>
-                    <?php endif; ?>
-
-                <?php elseif($status_saat_ini == 'ditolak'): ?>
-                    <span class="text-danger small fw-medium">
-                        <i class="bi bi-x-circle-fill me-1"></i> Peminjaman Ditolak Admin
-                    </span>
-                <?php else: ?>
-                    <span class="text-success small fw-medium">
-                        <i class="bi bi-check-circle-fill me-1"></i> Sudah Dikembalikan
-                    </span>
-                <?php endif; ?>
-                
+            <div class="status-badge <?= $badge_class; ?>">
+                <i class="bi <?= $badge_icon; ?>"></i> <?= $badge_text; ?>
             </div>
-
         </div>
-    <?php 
-        endwhile; 
-    endif; 
-    ?>
 
+        <div class="hc-body">
+            <div class="date-box">
+                <div class="db-item">
+                    <span>Tanggal Pinjam</span>
+                    <strong><?= $row['tgl_pinjam']; ?></strong>
+                </div>
+                <div class="db-item">
+                    <span>Tanggal Kembali</span>
+                    <strong><?= $row['tgl_kembali']; ?></strong>
+                </div>
+                
+                <?php if($role == 'admin'): ?>
+                <div class="db-item" style="margin-left: auto;">
+                    <span>Atas Nama (Form)</span>
+                    <strong class="text-primary"><?= htmlspecialchars($row['nama_peminjam']); ?></strong>
+                </div>
+                <?php endif; ?>
+            </div>
+
+            <div class="tag-list">
+                <div class="tag"><i class="bi bi-truck"></i> <?= str_replace('_', ' ', ucwords($row['metode_ambil'])); ?></div>
+                <?php if(!empty($row['keperluan'])): ?>
+                    <div class="tag tag-blue"><i class="bi bi-card-text"></i> <?= htmlspecialchars($row['keperluan']); ?></div>
+                <?php endif; ?>
+            </div>
+
+            <div class="item-row">
+                <div class="item-name"><i class="bi bi-box2 text-secondary"></i> <?= htmlspecialchars($row['nama_barang']); ?></div>
+                <div class="item-qty" title="Jumlah dipinjam"><?= $row['jumlah']; ?></div>
+            </div>
+        </div>
+
+        <div class="hc-footer">
+            <?php if ($status == 'dikembalikan'): ?>
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <div class="info-kondisi-balik">
+                        <?php if (!empty($row['kondisi_kembali'])): ?>
+                            <?php if ($row['kondisi_kembali'] == 'Rusak'): ?>
+                                <div class="kondisi-msg msg-rusak">
+                                    <i class="bi bi-exclamation-triangle-fill"></i> Barang dikembalikan rusak
+                                </div>
+                            <?php else: ?>
+                                <div class="kondisi-msg msg-baik">
+                                    <i class="bi bi-check-circle-fill"></i> Barang dikembalikan baik
+                                </div>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                        <div class="text-muted" style="font-size: 0.8rem; font-weight: 500; margin-top: 4px;">
+                            <i class="bi bi-check2-all"></i> Transaksi Selesai
+                        </div>
+                    </div>
+
+                    <?php if ($role == 'admin'): ?>
+                    <form action="" method="POST" style="margin: 0;">
+                        <input type="hidden" name="hapus_riwayat" value="1">
+                        <!-- ID asli database tetep dipakai buat proses update/hapus -->
+                        <input type="hidden" name="id_pinjam" value="<?= $row['id']; ?>">
+                        <button type="submit" class="btn-delete" onclick="return confirm('Sembunyikan riwayat transaksi ini dari tampilan Admin?')">
+                            <i class="bi bi-trash"></i> Bersihkan
+                        </button>
+                    </form>
+                    <?php endif; ?>
+                </div>
+            
+            <?php elseif ($status == 'menunggu'): ?>
+                <?php if ($role == 'admin'): ?>
+                    <form action="" method="POST" style="margin: 0;">
+                        <input type="hidden" name="setujui_pinjam" value="1">
+                        <input type="hidden" name="id_pinjam" value="<?= $row['id']; ?>">
+                        <button type="submit" class="btn-setujui" onclick="return confirm('Setujui peminjaman barang ini?')">
+                            <i class="bi bi-check2-circle"></i> Setujui Peminjaman
+                        </button>
+                    </form>
+                <?php else: ?>
+                    <div class="text-muted" style="font-size: 0.85rem;">
+                        Menunggu persetujuan admin.
+                    </div>
+                <?php endif; ?>
+
+            <?php elseif ($status == 'dipinjam' || $status == 'aktif'): ?>
+                <?php if ($role == 'admin'): ?>
+                    <div class="text-primary" style="font-size: 0.85rem; font-weight: 500;">
+                        <i class="bi bi-info-circle"></i> Barang sedang digunakan oleh peminjam.
+                    </div>
+                <?php else: ?>
+                    <form action="" method="POST" style="margin: 0; width: 100%; text-align: right;">
+                        <input type="hidden" name="ajukan_kembali" value="1">
+                        <input type="hidden" name="id_pinjam" value="<?= $row['id']; ?>">
+                        <span class="text-muted me-3" style="font-size: 0.85rem;">Barang sudah selesai digunakan?</span>
+                        <button type="submit" class="btn-primary-custom" onclick="return confirm('Serahkan kembali barang ke admin?')">
+                            <i class="bi bi-box-arrow-in-right"></i> Sudah Dikembalikan
+                        </button>
+                    </form>
+                <?php endif; ?>
+
+            <?php elseif ($status == 'menunggu_kembali'): ?>
+                <?php if ($role == 'admin'): ?>
+                    <form action="" method="POST" class="admin-action-box">
+                        <input type="hidden" name="kembalikan_barang" value="1">
+                        <input type="hidden" name="id_pinjam" value="<?= $row['id']; ?>">
+                        <input type="hidden" name="id_barang" value="<?= $row['id_barang']; ?>">
+                        <input type="hidden" name="jumlah" value="<?= $row['jumlah']; ?>">
+                        
+                        <span style="font-size: 0.85rem; font-weight: 600; color: #475569;">Kondisi Balik:</span>
+                        <select name="kondisi_kembali" class="form-select form-select-sm">
+                            <option value="Baik">✅ Baik / Aman</option>
+                            <option value="Rusak">❌ Rusak / Cacat</option>
+                        </select>
+                        <button type="submit" class="btn-konfirmasi" onclick="return confirm('Konfirmasi pengembalian barang ini?')">
+                            Terima Barang
+                        </button>
+                    </form>
+                <?php else: ?>
+                    <div class="text-primary" style="font-size: 0.85rem; font-weight: 500;">
+                        <i class="bi bi-hourglass-split"></i> Menunggu admin mengecek kondisi barang Anda.
+                    </div>
+                <?php endif; ?>
+
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php 
+        }
+    } else {
+        echo '<div class="text-center text-muted" style="padding: 4rem 0;">Belum ada riwayat transaksi.</div>';
+    }
+    ?>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
