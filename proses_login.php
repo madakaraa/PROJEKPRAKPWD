@@ -2,51 +2,33 @@
 session_start();
 include 'koneksi.php';
 
-// 1. Ambil data dari form login
-$username     = mysqli_real_escape_string($conn, $_POST['username']);
-$password     = $_POST['password'];
-$role_pilihan = isset($_POST['role']) ? $_POST['role'] : ''; // Menangkap tombol yang diklik
+$username = mysqli_real_escape_string($conn, $_POST['username']);
+$password = mysqli_real_escape_string($conn, $_POST['password']);
+$role     = mysqli_real_escape_string($conn, $_POST['role']);
 
-// 2. Cari data user di database
-$query = mysqli_query($conn, "SELECT * FROM users WHERE username='$username'");
-$data  = mysqli_fetch_assoc($query);
+// Query cari user sesuai input[cite: 1, 2]
+$query = "SELECT * FROM users WHERE username = '$username' AND password = '$password' AND role = '$role'";
+$result = mysqli_query($conn, $query);
 
-if ($data) {
-    // 3. Cek Password
-    if (password_verify($password, $data['password'])) {
+if (mysqli_num_rows($result) > 0) {
+    $data = mysqli_fetch_assoc($result);
+    
+    // Simpan semua data penting ke Session
+    $_SESSION['login'] = true;
+    $_SESSION['id']    = $data['id'];
+    $_SESSION['username'] = $data['username'];
+    $_SESSION['nama']  = $data['nama']; // KOLOM INI WAJIB ADA DI TABEL LU
+    $_SESSION['role']  = $data['role'];
 
-        // 🔥 4. PENJAGA PINTU UTAMA: 
-        // Samakan role di DB dengan tombol yang diklik di halaman login
-        $role_db   = strtolower(trim($data['role']));
-        $role_klik = strtolower(trim($role_pilihan));
-
-        // JIKA TOMBOL YANG DIKLIK TIDAK SAMA DENGAN JABATAN ASLINYA
-        if ($role_db !== $role_klik) {
-            // Tendang kembali ke halaman login!
-            header("Location: login.php?error=Akses ditolak! Anda harus memilih tab " . ucfirst($role_db) . " untuk akun ini.");
-            exit;
-        }
-
-        // ✅ JIKA COCOK (Admin klik Admin, User klik User): Izinkan masuk
-        $_SESSION['login'] = true;
-        $_SESSION['id']    = $data['id'];
-        $_SESSION['nama']  = $data['nama'];
-        $_SESSION['role']  = $data['role'];
-
-        // Arahkan ke dashboard masing-masing
-        if ($role_db == 'admin') {
-            header("Location: dashboard_admin.php");
-        } else {
-            header("Location: dashboard.php");
-        }
-        exit;
-
+    if ($data['role'] == 'admin') {
+        header("Location: dashboard_admin.php");
     } else {
-        header("Location: login.php?error=Password salah");
-        exit;
+        header("Location: dashboard.php");
     }
+    exit;
 } else {
-    header("Location: login.php?error=Username tidak ditemukan");
+    // Balik ke login kalau salah
+    header("Location: login.php?error=" . urlencode("Username, Password, atau Role salah!"));
     exit;
 }
 ?>
