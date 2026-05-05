@@ -149,6 +149,9 @@ $pesan_notif = isset($_GET['pesan']) ? htmlspecialchars($_GET['pesan']) : '';
 
         .btn-delete { border: 1px solid #fecaca; color: #dc2626; background: white; padding: 0.4rem 0.8rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 5px; }
         .btn-delete:hover { background: #fee2e2; }
+
+        /* Transisi biar ngilangnya lebih smooth */
+        .alert-dismissible { transition: opacity 0.3s ease; }
     </style>
 </head>
 <body>
@@ -165,9 +168,11 @@ $pesan_notif = isset($_GET['pesan']) ? htmlspecialchars($_GET['pesan']) : '';
         </div>
     </div>
 
+    <!-- Alert Notifikasi dengan ID 'autoAlert' -->
     <?php if($pesan_notif): ?>
-        <div class="alert alert-success" style="max-width: 900px; margin: 0 auto 1.5rem; border-radius: 12px;">
+        <div id="autoAlert" class="alert alert-success alert-dismissible fade show" role="alert" style="max-width: 900px; margin: 0 auto 1.5rem; border-radius: 12px; background-color: #d1e7dd; color: #0f5132; border: 1px solid #badbcc;">
             <i class="bi bi-check-circle-fill me-2"></i> <?= $pesan_notif; ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
     <?php endif; ?>
 
@@ -190,7 +195,6 @@ $pesan_notif = isset($_GET['pesan']) ? htmlspecialchars($_GET['pesan']) : '';
     <div class="history-card">
         <div class="hc-header">
             <div class="hc-id">
-                <!-- MENGGUNAKAN URUTAN TRANSAKSI KHUSUS PER USER -->
                 # TR-<?= $row['urutan_tr']; ?> 
                 <span class="hc-user"><i class="bi bi-person me-1"></i> <?= htmlspecialchars($row['username']); ?></span>
                 
@@ -260,7 +264,6 @@ $pesan_notif = isset($_GET['pesan']) ? htmlspecialchars($_GET['pesan']) : '';
                     <?php if ($role == 'admin'): ?>
                     <form action="" method="POST" style="margin: 0;">
                         <input type="hidden" name="hapus_riwayat" value="1">
-                        <!-- ID asli database tetep dipakai buat proses update/hapus -->
                         <input type="hidden" name="id_pinjam" value="<?= $row['id']; ?>">
                         <button type="submit" class="btn-delete" onclick="return confirm('Sembunyikan riwayat transaksi ini dari tampilan Admin?')">
                             <i class="bi bi-trash"></i> Bersihkan
@@ -334,6 +337,21 @@ $pesan_notif = isset($_GET['pesan']) ? htmlspecialchars($_GET['pesan']) : '';
     ?>
 </div>
 
+<!-- Script Bootstrap -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Script Auto-Hide Alert -->
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const alertBox = document.getElementById('autoAlert');
+    if (alertBox) {
+        setTimeout(() => {
+            alertBox.classList.remove('show');
+            setTimeout(() => alertBox.remove(), 300);
+        }, 3000); // 3000 ms = 3 detik
+    }
+});
+</script>
+
 </body>
 </html>
