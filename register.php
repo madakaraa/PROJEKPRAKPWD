@@ -1,9 +1,44 @@
 <?php
+session_start();
 include 'koneksi.php';
 
-// Mengambil parameter dengan aman (Mencegah XSS)
-$error   = isset($_GET['error']) ? htmlspecialchars($_GET['error']) : "";
-$success = isset($_GET['success']) ? htmlspecialchars($_GET['success']) : "";
+// Jika sudah login, lempar ke dashboard
+if (isset($_SESSION['login'])) {
+    header("Location: dashboard.php");
+    exit;
+}
+
+$pesan = '';
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    // Tangkap data dan sesuaikan dengan nama kolom di tabel 'users' lu
+    $nama     = mysqli_real_escape_string($conn, $_POST['nama_lengkap']); 
+    $email    = mysqli_real_escape_string($conn, $_POST['email']);
+    $no_telp  = mysqli_real_escape_string($conn, $_POST['no_telp']);
+    $no_rumah = mysqli_real_escape_string($conn, $_POST['no_rumah']);
+    $username = mysqli_real_escape_string($conn, $_POST['username']);
+    $password = mysqli_real_escape_string($conn, $_POST['password']);
+    
+    $role = 'user'; 
+
+    $cek_username = mysqli_query($conn, "SELECT * FROM users WHERE username = '$username'");
+    
+    if (mysqli_num_rows($cek_username) > 0) {
+        $pesan = "Username sudah terdaftar. Pakai yang lain ya!";
+    } else {
+        // Query insert menggunakan kolom 'nama' sesuai struktur tabel lu
+        $query = "INSERT INTO users (nama, email, username, password, no_telp, no_rumah, role) 
+                  VALUES ('$nama', '$email', '$username', '$password', '$no_telp', '$no_rumah', '$role')";
+                  
+        if (mysqli_query($conn, $query)) {
+            // Alihkan ke login.php dengan parameter sukses agar notifikasi muncul
+            header("Location: login.php?success=" . urlencode("Akun sudah dibuat, silakan login!"));
+            exit;
+        } else {
+            $pesan = "Registrasi gagal: " . mysqli_error($conn);
+        }
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -11,154 +46,80 @@ $success = isset($_GET['success']) ? htmlspecialchars($_GET['success']) : "";
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Daftar - PinjamBareng</title>
-
+    <title>Daftar Akun - PinjamBareng</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f8f9fa; /* Warna latar konsisten dengan login */
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 2rem 0;
-        }
-
-        /* Styling Kartu Register */
-        .register-card {
-            width: 100%;
-            max-width: 450px; /* Sedikit lebih lebar dari login karena form lebih banyak */
-            background: #ffffff;
-            border-radius: 20px;
-            padding: 2.5rem;
-            box-shadow: 0 15px 35px rgba(0,0,0,0.05);
-            border: 1px solid rgba(0,0,0,0.03);
-        }
-
-        .brand-icon {
-            font-size: 2.5rem;
-            color: #0d6efd;
-            margin-bottom: 0.5rem;
-        }
-
-        .register-title {
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            color: #212529;
-        }
-
-        /* Styling Form Input (Floating) */
-        .form-floating > .form-control {
-            border-radius: 12px;
-            border: 1px solid #dee2e6;
-        }
-
-        .form-control:focus {
-            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.1);
-            border-color: #86b7fe;
-        }
-
-        /* Styling Tombol */
-        .btn-register {
-            border-radius: 12px;
-            padding: 0.8rem;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-
-        .btn-register:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 15px rgba(13, 110, 253, 0.2);
-        }
-
-        /* Alert Notifikasi Mengambang */
-        .alert-custom {
-            position: fixed;
-            top: 24px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 9999;
-            min-width: 320px;
-            border-radius: 12px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            border: none;
-        }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 1rem; }
+        .register-card { background: white; padding: 2.5rem; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.03); width: 100%; max-width: 420px; }
+        .header-icon { color: #0d6efd; font-size: 2.5rem; text-align: center; margin-bottom: 0.5rem; display: block; }
+        .register-card h2 { text-align: center; font-weight: 700; color: #0f172a; margin-bottom: 0.3rem; font-size: 1.5rem; }
+        .register-card p { text-align: center; color: #64748b; font-size: 0.85rem; margin-bottom: 1.5rem; }
+        .input-group-custom { display: flex; align-items: center; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0.6rem 1rem; margin-bottom: 1rem; transition: all 0.2s; background: white; }
+        .input-group-custom:focus-within { border-color: #0d6efd; box-shadow: 0 0 0 3px rgba(13,110,253,0.1); }
+        .input-group-custom i { color: #64748b; margin-right: 12px; font-size: 1.1rem; }
+        .input-group-custom input { border: none; outline: none; width: 100%; font-size: 0.9rem; color: #1e293b; background: transparent; }
+        .btn-register { width: 100%; background: #0d6efd; color: white; border: none; padding: 0.75rem; border-radius: 10px; font-weight: 600; font-size: 0.95rem; margin-top: 0.5rem; display: flex; justify-content: center; align-items: center; gap: 8px; transition: 0.2s; }
+        .btn-register:hover { background: #0b5ed7; }
+        .login-link { text-align: center; margin-top: 1.5rem; font-size: 0.85rem; color: #64748b; }
+        .login-link a { color: #0d6efd; text-decoration: none; font-weight: 600; }
     </style>
 </head>
 <body>
 
-<?php if($success): ?>
-    <div class="alert alert-success alert-dismissible fade show alert-custom d-flex align-items-center" role="alert" id="autoAlert">
-        <i class="bi bi-check-circle-fill me-2 fs-5"></i>
-        <div><?= $success; ?></div>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-<?php endif; ?>
+<div class="register-card">
+    <i class="bi bi-person-plus header-icon"></i>
+    <h2>Daftar Akun</h2>
+    <p>Lengkapi data di bawah untuk bergabung</p>
 
-<?php if($error): ?>
-    <div class="alert alert-danger alert-dismissible fade show alert-custom d-flex align-items-center" role="alert" id="autoAlert">
-        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
-        <div><?= $error; ?></div>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-<?php endif; ?>
+    <?php if($pesan): ?>
+        <div class="alert alert-danger" style="font-size: 0.85rem; padding: 0.7rem; border-radius: 10px;">
+            <i class="bi bi-exclamation-circle me-1"></i> <?= $pesan; ?>
+        </div>
+    <?php endif; ?>
 
-<div class="register-card text-center mx-3">
-    <i class="bi bi-person-plus brand-icon"></i>
-    <h3 class="register-title mb-1">Daftar Akun</h3>
-    <p class="text-muted mb-4 small">Lengkapi data di bawah untuk bergabung</p>
-
-    <form action="proses_register.php" method="POST">
-        
-        <div class="form-floating mb-3">
-            <input type="text" name="nama" class="form-control" id="floatingNama" placeholder="Nama Lengkap" required>
-            <label for="floatingNama" class="text-muted"><i class="bi bi-person-badge me-1"></i> Nama Lengkap</label>
+    <form action="" method="POST">
+        <div class="input-group-custom">
+            <i class="bi bi-person-vcard"></i>
+            <input type="text" name="nama_lengkap" placeholder="Nama Lengkap" required>
         </div>
 
-        <div class="form-floating mb-3">
-            <input type="email" name="email" class="form-control" id="floatingEmail" placeholder="Email" required>
-            <label for="floatingEmail" class="text-muted"><i class="bi bi-envelope me-1"></i> Alamat Email</label>
+        <div class="input-group-custom">
+            <i class="bi bi-envelope"></i>
+            <input type="email" name="email" placeholder="Alamat Email" required>
         </div>
 
-        <div class="form-floating mb-3">
-            <input type="text" name="username" class="form-control" id="floatingUsername" placeholder="Username" autocomplete="off" required>
-            <label for="floatingUsername" class="text-muted"><i class="bi bi-person me-1"></i> Username</label>
+        <div class="input-group-custom">
+            <i class="bi bi-telephone"></i>
+            <input type="number" name="no_telp" placeholder="No. Telepon / WhatsApp" required>
         </div>
 
-        <div class="form-floating mb-4">
-            <input type="password" name="password" class="form-control" id="floatingPassword" placeholder="Password" autocomplete="off" required>
-            <label for="floatingPassword" class="text-muted"><i class="bi bi-shield-lock me-1"></i> Password</label>
+        <div class="input-group-custom">
+            <i class="bi bi-house-door"></i>
+            <input type="text" name="no_rumah" placeholder="No. Rumah" required>
         </div>
 
-        <button type="submit" class="btn btn-primary btn-register w-100">
-            Daftar Sekarang <i class="bi bi-check2-circle ms-1"></i>
+        <div class="input-group-custom">
+            <i class="bi bi-person"></i>
+            <input type="text" name="username" placeholder="Username" required>
+        </div>
+
+        <div class="input-group-custom">
+            <i class="bi bi-shield-lock"></i>
+            <input type="password" name="password" placeholder="Password" required>
+        </div>
+
+        <button type="submit" class="btn-register">
+            Daftar Sekarang <i class="bi bi-check-circle"></i>
         </button>
     </form>
 
-    <div class="mt-4 pt-3 border-top">
-        <p class="text-muted small mb-0">
-            Sudah punya akun? <a href="login.php" class="text-decoration-none fw-semibold">Login di sini</a>
-        </p>
+    <div class="login-link">
+        Sudah punya akun? <a href="login.php">Login di sini</a>
     </div>
 </div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-<script>
-document.addEventListener("DOMContentLoaded", function() {
-    const alertBox = document.getElementById('autoAlert');
-    if (alertBox) {
-        setTimeout(() => {
-            alertBox.classList.remove('show');
-            setTimeout(() => alertBox.remove(), 150);
-        }, 3500);
-    }
-});
-</script>
 
 </body>
 </html>
