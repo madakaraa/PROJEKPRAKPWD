@@ -205,7 +205,7 @@ $jml_dipinjam = mysqli_num_rows(mysqli_query($conn, "SELECT id FROM peminjaman W
     <!-- Welcome Section -->
     <div class="welcome-section">
         <span class="admin-badge"><i class="bi bi-shield-lock-fill me-1"></i> Administrator</span>
-        <h1 class="fw-bold mb-2">Pusat Kendali, <?= htmlspecialchars($_SESSION['nama']); ?>.</h1>
+        <h1 class="fw-bold mb-2">Pusat Kendali, <?= htmlspecialchars($_SESSION['nama'] ?? 'Admin'); ?>.</h1>
         <p class="fs-6 fw-light opacity-75 m-0" style="max-width: 600px;">
             Pantau statistik, kelola inventaris barang, dan verifikasi setiap transaksi peminjaman di komunitas Anda dari satu tempat.
         </p>
@@ -280,7 +280,7 @@ $jml_dipinjam = mysqli_num_rows(mysqli_query($conn, "SELECT id FROM peminjaman W
             </a>
         </div>
 
-        <!-- Menu 3: Manajemen Pengguna (SUDAH DIAKTIFKAN) -->
+        <!-- Menu 3: Manajemen Pengguna -->
         <div class="col-lg-4 col-md-6">
             <a href="kelola_pengguna.php" class="menu-card h-100">
                 <i class="bi bi-people menu-icon-top text-primary" style="background: linear-gradient(135deg, #3b82f6, #2563eb); -webkit-background-clip: text; -webkit-text-fill-color: transparent;"></i>
@@ -292,34 +292,54 @@ $jml_dipinjam = mysqli_num_rows(mysqli_query($conn, "SELECT id FROM peminjaman W
 
     </div>
 
-    <!-- Aktivitas Terkini Admin (Dinamis dari Database) -->
+    <!-- Aktivitas Terkini Admin (Dinamis dari Peminjaman) -->
     <div class="admin-activity-wrap">
         <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
             <h6 class="text-dark fw-bold mb-0"><i class="bi bi-activity text-primary me-2"></i>Aktivitas Sistem Terkini</h6>
         </div>
         
         <?php
-        $query_aktivitas = mysqli_query($conn, "SELECT * FROM aktivitas ORDER BY created_at DESC LIMIT 5");
+        // LOGIKA BARU: Tarik data langsung dari tabel transaksi[cite: 3]
+        $q_aktivitas = mysqli_query($conn, "SELECT p.*, u.nama, b.nama_barang 
+                                            FROM peminjaman p 
+                                            JOIN users u ON p.id_user = u.id 
+                                            JOIN barang b ON p.id_barang = b.id 
+                                            ORDER BY p.id DESC LIMIT 5");
         
-        if(mysqli_num_rows($query_aktivitas) > 0) {
-            while($akt = mysqli_fetch_assoc($query_aktivitas)) {
-                $warna_titik = ''; $badge_class = ''; $teks_badge = '';
+        if(mysqli_num_rows($q_aktivitas) > 0) {
+            while($akt = mysqli_fetch_assoc($q_aktivitas)) {
+                $status_act = strtolower($akt['status']);
+                $nama_user  = htmlspecialchars($akt['nama']);
+                $nama_brg   = htmlspecialchars($akt['nama_barang']);
                 
-                if($akt['kategori'] == 'selesai') {
-                    $warna_titik = 'green'; $badge_class = 'returned'; $teks_badge = 'Selesai';
-                } elseif($akt['kategori'] == 'aktif') {
-                    $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Aktif';
-                } else {
+                if($status_act == 'menunggu') {
+                    $judul = "<strong>$nama_user</strong> mengajukan peminjaman <strong>$nama_brg</strong>";
+                    $sub   = "Menunggu Verifikasi";
                     $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Baru';
+                } elseif($status_act == 'dipinjam' || $status_act == 'aktif') {
+                    $judul = "<strong>$nama_user</strong> sedang meminjam <strong>$nama_brg</strong>";
+                    $sub   = "Sedang Dipinjam";
+                    $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Aktif';
+                } elseif($status_act == 'menunggu_kembali') {
+                    $judul = "<strong>$nama_user</strong> mengajukan pengembalian <strong>$nama_brg</strong>";
+                    $sub   = "Pengecekan Admin";
+                    $warna_titik = 'amber'; $badge_class = 'active'; $teks_badge = 'Cek';
+                } elseif($status_act == 'dikembalikan') {
+                    $judul = "<strong>$nama_user</strong> telah mengembalikan <strong>$nama_brg</strong>";
+                    $sub   = "Selesai";
+                    $warna_titik = 'green'; $badge_class = 'returned'; $teks_badge = 'Selesai';
+                } else {
+                    $judul = "<strong>$nama_user</strong> melakukan transaksi <strong>$nama_brg</strong>";
+                    $sub   = "Info";
+                    $warna_titik = 'blue'; $badge_class = 'new'; $teks_badge = 'Info';
                 }
         ?>
             <div class="act-item">
                 <div class="act-dot <?= $warna_titik; ?>"></div>
                 <div class="act-info">
-                    <div class="act-title"><?= htmlspecialchars($akt['deskripsi']); ?></div>
+                    <div class="act-title"><?= $judul; ?></div>
                     <div class="act-time">
-                        <?= waktu_lalu($akt['created_at']); ?> 
-                        <?= $akt['sub_deskripsi'] ? ' • ' . htmlspecialchars($akt['sub_deskripsi']) : ''; ?>
+                        ID Transaksi: #TR-<?= $akt['id']; ?> • <?= $sub; ?>
                     </div>
                 </div>
                 <span class="act-badge <?= $badge_class; ?>"><?= $teks_badge; ?></span>
